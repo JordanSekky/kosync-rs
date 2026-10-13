@@ -39,7 +39,7 @@ where
         // bcrypt is deliberately slow, keep it off the async workers
         let verified = tokio::task::spawn_blocking(move || bcrypt::verify(auth.key, &hash))
             .await
-            .map_err(|_| Error::ServerError)??;
+            .map_err(|_| Error::Server)??;
 
         match user {
             Some(user) if verified => Ok(Self(user)),

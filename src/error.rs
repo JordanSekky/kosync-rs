@@ -41,7 +41,7 @@ pub enum Error {
     #[error("invalid query: {0}")]
     InvalidQuery(#[from] QueryRejection),
     #[error("internal server error")]
-    ServerError,
+    Server,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
     #[error(transparent)]
@@ -80,7 +80,7 @@ impl IntoResponse for Error {
             Error::RegistrationDisabled => {
                 (StatusCode::FORBIDDEN, "Registration is disabled.".into())
             }
-            Error::ServerError => (
+            Error::Server => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Internal Server Error.".into(),
             ),

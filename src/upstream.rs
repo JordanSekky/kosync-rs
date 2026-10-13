@@ -46,7 +46,7 @@ impl Upstream {
     ) -> Result<()> {
         let mut url = self.url.clone();
         url.path_segments_mut()
-            .map_err(|()| Error::ServerError)?
+            .map_err(|()| Error::Server)?
             .pop_if_empty()
             .extend(["syncs", "progress"]);
 
