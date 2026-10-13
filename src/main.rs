@@ -4,6 +4,9 @@ use axum::{Router, extract::FromRef};
 use clap::Parser;
 use tokio::net::TcpListener;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tracing_subscriber::{
+    EnvFilter, filter::LevelFilter, layer::SubscriberExt, util::SubscriberInitExt,
+};
 
 mod auth;
 mod authenticated_user;
@@ -12,12 +15,14 @@ mod db;
 mod error;
 mod extract;
 mod handlers;
+mod logs;
 mod models;
 mod upstream;
 
 use config::Config;
 use db::Db;
 use handlers::kosync::RegistrationEnabled;
+use logs::LogBuffer;
 use upstream::Upstream;
 
 #[derive(Clone, FromRef)]
@@ -28,13 +33,27 @@ struct AppState {
     upstream: Option<Upstream>,
     /// Background upstream pushes, waited on at shutdown.
     tasks: TaskTracker,
+    /// The most recent log lines, and the feed of new ones
+    log_buffer: LogBuffer,
+    /// Cancelled when shutdown starts, to end streams that would otherwise
+    /// keep their connections open and hold up graceful shutdown.
+    shutdown: CancellationToken,
 }
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
-
     let config = Config::parse();
+
+    let log_buffer = LogBuffer::new(config.log_buffer_lines);
+    tracing_subscriber::registry()
+        .with(
+            EnvFilter::builder()
+                .with_default_directive(LevelFilter::INFO.into())
+                .from_env_lossy(),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .with(log_buffer.clone())
+        .init();
 
     if config.print_openapi {
         let (_, api) = handlers::admin::router::<AppState>(
@@ -53,12 +72,15 @@ async fn main() {
         .expect("Failed to open database");
 
     let tasks = TaskTracker::new();
+    let shutdown = CancellationToken::new();
 
     let state = AppState {
         db: db.clone(),
         registration_enabled: RegistrationEnabled(config.enable_registration),
         upstream: config.upstream_url.map(Upstream::new),
         tasks: tasks.clone(),
+        log_buffer,
+        shutdown: shutdown.clone(),
     };
 
     let app = handlers::kosync::router().with_state(state.clone());
@@ -71,7 +93,6 @@ async fn main() {
     let admin_listener = bind(config.admin_bind_addr).await;
 
     // One signal stops both listeners, which then let in-flight requests finish
-    let shutdown = CancellationToken::new();
     tokio::spawn({
         let shutdown = shutdown.clone();
         async move {

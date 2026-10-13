@@ -5,6 +5,7 @@ use aide::{
     openapi::{Info, OpenApi, Server},
 };
 use axum::{Extension, Json, Router, extract::FromRef, routing::get};
+use tokio_util::sync::CancellationToken;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 use super::{method_not_allowed, not_found};
@@ -12,17 +13,20 @@ use crate::{
     config::{CorsOrigins, PathPrefix},
     db::Db,
     error::ErrorResponse,
+    logs::LogBuffer,
 };
 
 mod books;
 mod devices;
 mod health;
+mod logs;
 mod progress;
 mod users;
 
 /// Routes for the admin listener, which runs on its own port, together with
 /// the OpenAPI document describing them. Works with any state that can hand
-/// out a [`Db`].
+/// out a [`Db`], the [`LogBuffer`] and the [`CancellationToken`] that ends
+/// long-lived streams when the server shuts down.
 ///
 /// The routes are read-only. Browsers may call them from `cors_origins`, so
 /// that a web client served elsewhere can.
@@ -35,6 +39,8 @@ pub fn router<S>(cors_origins: &CorsOrigins, path_prefix: &PathPrefix) -> (Route
 where
     S: Clone + Send + Sync + 'static,
     Db: FromRef<S>,
+    LogBuffer: FromRef<S>,
+    CancellationToken: FromRef<S>,
 {
     let mut api = OpenApi {
         info: Info {
@@ -103,6 +109,19 @@ where
                 op.id("listDevices")
                     .summary("List devices progress was pushed from")
                     .tag("devices")
+            }),
+        )
+        .api_route(
+            "/logs",
+            get_with(logs::stream, |op| {
+                op.id("streamLogs")
+                    .summary("Stream application logs")
+                    .description(
+                        "Server-sent events: the cached log entries, oldest first, followed by \
+                         new ones as they are logged. Use `EventSource` rather than `fetch`, \
+                         which reconnects and resumes by itself.",
+                    )
+                    .tag("logs")
             }),
         )
         // A plain axum route, so the spec doesn't document itself: through

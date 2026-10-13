@@ -175,6 +175,17 @@ pub struct Config {
     #[arg(long, env = "UPSTREAM_URL")]
     pub upstream_url: Option<Url>,
 
+    /// How many of the most recent log lines to keep in memory for the admin
+    /// log stream to replay to new viewers. 0 keeps none, so a viewer only
+    /// sees what is logged while it is connected.
+    #[arg(
+        long,
+        env = "LOG_BUFFER_LINES",
+        default_value_t = 1000,
+        value_name = "LINES"
+    )]
+    pub log_buffer_lines: usize,
+
     /// Print the admin API's OpenAPI document to stdout and exit, without
     /// opening the database or binding any listener
     #[arg(long)]

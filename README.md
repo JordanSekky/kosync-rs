@@ -52,9 +52,11 @@ Every option can be given as a flag or an environment variable; a flag wins over
 | `--upstream-url`        | `UPSTREAM_URL`        | none                 | Base URL of another kosync server to forward pushes to   |
 | `--admin-path-prefix`   | `ADMIN_PATH_PREFIX`   | none                 | Path the admin routes are served under, e.g. `/api`      |
 | `--admin-cors-origins`  | `ADMIN_CORS_ORIGINS`  | none                 | Origins browsers may call the admin API from (see below) |
+| `--log-buffer-lines`    | `LOG_BUFFER_LINES`    | `1000`               | Log lines kept in memory for the admin log stream (`0` keeps none) |
 | `--print-openapi`       |                       | off                  | Print the admin API's OpenAPI document and exit          |
 
-Logging is controlled with `RUST_LOG`, for example `RUST_LOG=kosync_proxy=debug`. The default level is `info`.
+Logging is controlled with `RUST_LOG`, for example `RUST_LOG=kosync_proxy=debug`. The default level is `info`. The admin
+API's [log stream](#log-stream) carries the same lines that go to stdout.
 
 ### Closing registration
 
@@ -148,6 +150,7 @@ The paths below are relative to `--admin-path-prefix`.
 | `GET`  | `/progress`   | Progress history across all users, newest first                    | `{"entries", "next_cursor"}` |
 | `GET`  | `/books`      | Documents with history, for populating a book filter               | `{"books": [...]}`      |
 | `GET`  | `/devices`    | Devices progress was pushed from, for populating a device filter   | `{"devices": [...]}`    |
+| `GET`  | `/logs`       | Application log, cached lines first and then live ([details](#log-stream)) | `text/event-stream` |
 | `GET`  | `/api.json`   | OpenAPI 3.1 document describing all of the above                   | OpenAPI JSON            |
 
 `/progress` takes these query parameters, all optional and combined with AND:
@@ -166,6 +169,44 @@ while new pushes arrive. `/books` and `/devices` accept `user_id` to narrow the 
 
 Timestamps are RFC 3339 strings with nanosecond precision. Errors have the same `{"message": "..."}` shape as the sync
 API, and `title`, `authors` and `filename` are `null` for documents whose client never sent metadata.
+
+#### Log stream
+
+`GET /logs` is a [server-sent events](https://developer.mozilla.org/docs/Web/API/Server-sent_events) stream of what the
+application logs. A new connection first receives the cached lines, oldest first, and then each new line as it is
+logged. The cache holds the last `--log-buffer-lines` lines and lives in memory, so it starts empty after a restart.
+
+```js
+const source = new EventSource("/api/logs");
+source.onmessage = (event) => {
+  const entry = JSON.parse(event.data);
+  console.log(entry.timestamp, entry.level, entry.message, entry.fields);
+};
+```
+
+Each event's `data` is a JSON object:
+
+| Field       | Meaning                                                                                  |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| `id`        | Counts up by one per line, starting at 1 on each start of the server                     |
+| `timestamp` | RFC 3339 time the line was logged                                                        |
+| `level`     | `trace`, `debug`, `info`, `warn` or `error`                                              |
+| `target`    | The module that logged it, such as `kosync_proxy::upstream`                              |
+| `message`   | The log message, empty if there was none                                                 |
+| `fields`    | The other fields logged with it, as strings                                              |
+| `spans`     | The spans it was logged inside of, outermost first, each `{name, fields}`                |
+
+- **Reconnecting**: `EventSource` reconnects by itself and sends `Last-Event-ID`, and the stream then continues after
+  that line instead of replaying the cache. An id from before the server restarted is ignored, so the whole cache is
+  sent.
+- **Falling behind**: a client that can't keep up skips ahead rather than slowing the server down. A jump in `id`
+  shows where lines were dropped.
+- **Levels**: the stream only has what passes `RUST_LOG`, so raise the level to see more in it.
+- **Reverse proxies**: the response sets `X-Accel-Buffering: no` for nginx. Other proxies that buffer responses need
+  that turned off for this path.
+- **Privacy**: the log includes usernames and upstream errors, and like the rest of the admin API it has no
+  authentication.
+- **Shutdown**: open streams are closed when the server shuts down, so a page left open doesn't hold it up.
 
 #### Sharing a port with a web client
 
@@ -210,7 +251,8 @@ npx openapi-typescript openapi.json -o api.d.ts
 - **Authentication**: the key the client sends is bcrypt-hashed before it is stored. Verification runs on a blocking
   thread, and an unknown username does the same amount of work as a wrong key so account existence is not leaked.
 - **Shutdown**: on ctrl-c or SIGTERM both listeners stop accepting connections, lets in-flight requests and forwards
-  finish, then closes the database pools so SQLite can checkpoint and clean up its WAL files.
+  finish (open log streams are ended so they don't hold this up), then closes the database pools so SQLite can
+  checkpoint and clean up its WAL files.
 
 ## Building
 
@@ -225,6 +267,7 @@ requests to `main` and publishes it to `ghcr.io` on pushes.
 ## Known limitations
 
 - Progress history is never pruned.
+- The log stream's cache is in memory only and is lost on restart.
 - The health check only reports that the server is accepting requests; it does not touch the database.
 - The admin API is unauthenticated and read-only, and rejects cross-origin browser requests unless `--admin-cors-origins` lists the origin.
 - There is no rate limiting.
