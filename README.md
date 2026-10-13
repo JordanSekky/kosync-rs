@@ -21,7 +21,9 @@ docker run -d --name kosync \
   ghcr.io/jordansekky/kosync-rs
 ```
 
-The database lives in `/data`, so mount a volume there to keep it across restarts.
+The database lives in `/data`, so mount a volume there to keep it across restarts. The [admin listener](#admin-listener)
+is not published here: it listens on loopback inside the container by default, so to reach it from the host also set
+`-e ADMIN_BIND_ADDR=0.0.0.0:3001` and publish `-p 127.0.0.1:3001:3001`.
 
 ### From source
 
@@ -44,9 +46,13 @@ Every option can be given as a flag or an environment variable; a flag wins over
 | Flag                    | Environment variable  | Default              | Description                                              |
 | ----------------------- | --------------------- | -------------------- | -------------------------------------------------------- |
 | `--database-url`        | `DATABASE_URL`        | `sqlite://kosync.db` | SQLite database to store users and progress in           |
-| `--bind-addr`           | `BIND_ADDR`           | `0.0.0.0:3000`       | Address to listen on                                     |
+| `--bind-addr`           | `BIND_ADDR`           | `0.0.0.0:3000`       | Address the sync API listens on                          |
+| `--admin-bind-addr`     | `ADMIN_BIND_ADDR`     | `127.0.0.1:3001`     | Address the admin listener (health check and admin API)  |
 | `--enable-registration` | `ENABLE_REGISTRATION` | `true`               | Whether new users can register (`true` or `false`)       |
 | `--upstream-url`        | `UPSTREAM_URL`        | none                 | Base URL of another kosync server to forward pushes to   |
+| `--admin-path-prefix`   | `ADMIN_PATH_PREFIX`   | none                 | Path the admin routes are served under, e.g. `/api`      |
+| `--admin-cors-origins`  | `ADMIN_CORS_ORIGINS`  | none                 | Origins browsers may call the admin API from (see below) |
+| `--print-openapi`       |                       | off                  | Print the admin API's OpenAPI document and exit          |
 
 Logging is controlled with `RUST_LOG`, for example `RUST_LOG=kosync_proxy=debug`. The default level is `info`.
 
@@ -111,6 +117,89 @@ Errors come back as `{"message": "..."}` with the status codes below.
 A pull for a document that was never synced answers `200 {}` rather than a `404`, matching the reference server; the
 client reads a missing `percentage` as "no progress yet".
 
+### Admin listener
+
+A second listener, on its own port, serves a read-only API for inspecting users and their progress history. It is meant
+for a web UI and shares the shutdown behaviour of the main listener.
+
+**It has no authentication.** It listens on `127.0.0.1` by default; if you bind it elsewhere, put it behind something
+that authenticates.
+
+Which web pages a browser lets call it is set with `--admin-cors-origins`:
+
+| Value                                             | Effect                                                              |
+| ------------------------------------------------- | ------------------------------------------------------------------- |
+| empty (the default)                               | None: only same-origin pages and non-browser clients can use it     |
+| `http://localhost:5173,https://admin.example.com` | Only these origins, written as `scheme://host[:port]` with no path  |
+| `*`                                               | Any origin. Any page the browser loads can read the API.            |
+
+A web client served from a different origin than the API, such as a dev server on another port, has to be listed here.
+
+CORS is enforced by the browser, so it narrows who can read the API from a web page; it does not stop `curl` or anything
+else that can reach the port.
+
+The paths below are relative to `--admin-path-prefix`.
+
+| Method | Path          | Description                                                        | Response                |
+| ------ | ------------- | ------------------------------------------------------------------ | ----------------------- |
+| `GET`  | `/health`     | Liveness check                                                     | `{"status": "ok"}`      |
+| `GET`  | `/users`      | Registered users, with entry and book counts and last activity     | `{"users": [...]}`      |
+| `GET`  | `/users/{id}` | One user, same shape                                               | user, or `404`          |
+| `GET`  | `/progress`   | Progress history across all users, newest first                    | `{"entries", "next_cursor"}` |
+| `GET`  | `/books`      | Documents with history, for populating a book filter               | `{"books": [...]}`      |
+| `GET`  | `/devices`    | Devices progress was pushed from, for populating a device filter   | `{"devices": [...]}`    |
+| `GET`  | `/api.json`   | OpenAPI 3.1 document describing all of the above                   | OpenAPI JSON            |
+
+`/progress` takes these query parameters, all optional and combined with AND:
+
+| Parameter             | Meaning                                                                     |
+| --------------------- | --------------------------------------------------------------------------- |
+| `user_id`             | Only this user's entries                                                    |
+| `document`            | Only this document, as listed by `/books`                                   |
+| `device`, `device_id` | Only entries pushed from a device with this name / id                       |
+| `from`, `to`          | RFC 3339 times; `from` is inclusive and `to` exclusive                      |
+| `limit`               | Page size, 100 by default and at most 500                                   |
+| `cursor`              | The previous page's `next_cursor`; absent on the first page                 |
+
+`next_cursor` is `null` on the last page. Paging is keyed on the entry id rather than an offset, so pages stay stable
+while new pushes arrive. `/books` and `/devices` accept `user_id` to narrow the list to one user.
+
+Timestamps are RFC 3339 strings with nanosecond precision. Errors have the same `{"message": "..."}` shape as the sync
+API, and `title`, `authors` and `filename` are `null` for documents whose client never sent metadata.
+
+#### Sharing a port with a web client
+
+With `--admin-path-prefix /api`, every admin route, `/health` and `/api.json` included, is served under `/api`
+(`/api/users`, `/api/health`, ...) and anything outside of it is a `404`. A reverse proxy can then send `/api/` to the
+admin listener and everything else to wherever the web client is served from, on one host and port. The proxy has to
+forward the path unchanged: do not strip the prefix. In Caddy that is `handle`, not `handle_path`:
+
+```
+example.com {
+    handle /api/* {
+        reverse_proxy 127.0.0.1:3001
+    }
+    handle {
+        root * /srv/kosync-web
+        try_files {path} /index.html
+        file_server
+    }
+}
+```
+
+The browser then sees one origin, so no CORS origins need to be configured. The prefix does not apply to the sync API on
+the main listener, and it is only a path: it does not add authentication.
+
+The OpenAPI document keeps the routes' own paths (`/users`, not `/api/users`) and lists the prefix as its `servers` entry,
+so a generated client is the same for every deployment and takes the prefix as its base URL.
+
+To generate a client, point a generator at `/api.json`, or write the document without starting a server:
+
+```sh
+kosync-proxy --print-openapi > openapi.json
+npx openapi-typescript openapi.json -o api.d.ts
+```
+
 ## How it works
 
 - **Storage**: SQLite in WAL mode with two connection pools, a single-connection pool for writes and a read-only pool
@@ -120,7 +209,7 @@ client reads a missing `percentage` as "no progress yet".
   seconds.
 - **Authentication**: the key the client sends is bcrypt-hashed before it is stored. Verification runs on a blocking
   thread, and an unknown username does the same amount of work as a wrong key so account existence is not leaked.
-- **Shutdown**: on ctrl-c or SIGTERM the server stops accepting connections, lets in-flight requests and forwards
+- **Shutdown**: on ctrl-c or SIGTERM both listeners stop accepting connections, lets in-flight requests and forwards
   finish, then closes the database pools so SQLite can checkpoint and clean up its WAL files.
 
 ## Building
@@ -136,4 +225,6 @@ requests to `main` and publishes it to `ghcr.io` on pushes.
 ## Known limitations
 
 - Progress history is never pruned.
-- There is no health-check endpoint and no rate limiting.
+- The health check only reports that the server is accepting requests; it does not touch the database.
+- The admin API is unauthenticated and read-only, and rejects cross-origin browser requests unless `--admin-cors-origins` lists the origin.
+- There is no rate limiting.

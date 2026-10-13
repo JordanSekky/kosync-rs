@@ -21,5 +21,5 @@ FROM debian:trixie-slim
 WORKDIR /data
 VOLUME /data
 COPY --from=builder /app/kosync-proxy /usr/local/bin/kosync-proxy
-EXPOSE 3000
+EXPOSE 3000 3001
 ENTRYPOINT ["kosync-proxy"]

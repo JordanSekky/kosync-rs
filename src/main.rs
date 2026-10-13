@@ -1,6 +1,9 @@
-use axum::extract::FromRef;
+use std::net::SocketAddr;
+
+use axum::{Router, extract::FromRef};
 use clap::Parser;
-use tokio_util::task::TaskTracker;
+use tokio::net::TcpListener;
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 mod auth;
 mod authenticated_user;
@@ -14,7 +17,7 @@ mod upstream;
 
 use config::Config;
 use db::Db;
-use handlers::RegistrationEnabled;
+use handlers::kosync::RegistrationEnabled;
 use upstream::Upstream;
 
 #[derive(Clone, FromRef)]
@@ -33,27 +36,54 @@ async fn main() {
 
     let config = Config::parse();
 
+    if config.print_openapi {
+        let (_, api) = handlers::admin::router::<AppState>(
+            &config.admin_cors_origins,
+            &config.admin_path_prefix,
+        );
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&*api).expect("Failed to serialize the OpenAPI document")
+        );
+        return;
+    }
+
     let db = Db::connect(&config.database_url)
         .await
         .expect("Failed to open database");
 
     let tasks = TaskTracker::new();
 
-    let app = handlers::router().with_state(AppState {
+    let state = AppState {
         db: db.clone(),
         registration_enabled: RegistrationEnabled(config.enable_registration),
         upstream: config.upstream_url.map(Upstream::new),
         tasks: tasks.clone(),
+    };
+
+    let app = handlers::kosync::router().with_state(state.clone());
+
+    let (admin_app, _) =
+        handlers::admin::router(&config.admin_cors_origins, &config.admin_path_prefix);
+    let admin_app = admin_app.with_state(state);
+
+    let listener = bind(config.bind_addr).await;
+    let admin_listener = bind(config.admin_bind_addr).await;
+
+    // One signal stops both listeners, which then let in-flight requests finish
+    let shutdown = CancellationToken::new();
+    tokio::spawn({
+        let shutdown = shutdown.clone();
+        async move {
+            shutdown_signal().await;
+            shutdown.cancel();
+        }
     });
 
-    let listener = tokio::net::TcpListener::bind(config.bind_addr)
-        .await
-        .unwrap_or_else(|e| panic!("Failed to bind to {}: {e}", config.bind_addr));
-    // Stops accepting connections on ctrl-c and lets in-flight requests finish
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .expect("Ahhh!");
+    tokio::join!(
+        serve(listener, app, shutdown.clone()),
+        serve(admin_listener, admin_app, shutdown),
+    );
 
     // No request can spawn a forward any more, so let the running ones finish
     tasks.close();
@@ -66,6 +96,19 @@ async fn main() {
     tasks.wait().await;
 
     db.close().await;
+}
+
+async fn bind(addr: SocketAddr) -> TcpListener {
+    TcpListener::bind(addr)
+        .await
+        .unwrap_or_else(|e| panic!("Failed to bind to {addr}: {e}"))
+}
+
+async fn serve(listener: TcpListener, app: Router, shutdown: CancellationToken) {
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown.cancelled_owned())
+        .await
+        .expect("Ahhh!");
 }
 
 /// Resolves on ctrl-c or, on unix, SIGTERM, which is what `docker stop` and

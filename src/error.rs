@@ -1,15 +1,24 @@
+use aide::OperationIo;
 use axum::{
     Json,
-    extract::rejection::{JsonRejection, PathRejection},
+    extract::rejection::{JsonRejection, PathRejection, QueryRejection},
     http::StatusCode,
     response::IntoResponse,
 };
+use schemars::JsonSchema;
 use serde::Serialize;
 use thiserror::Error;
 
 use crate::models::User;
 
-#[derive(Debug, Error)]
+/// The body of every error response.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ErrorResponse {
+    pub message: String,
+}
+
+#[derive(Debug, Error, OperationIo)]
+#[aide(output)]
 pub enum Error {
     #[error("unauthorized")]
     Unauthorized,
@@ -28,6 +37,9 @@ pub enum Error {
     /// A path parameter couldn't be parsed.
     #[error("invalid path: {0}")]
     InvalidPath(#[from] PathRejection),
+    /// The query string couldn't be parsed.
+    #[error("invalid query: {0}")]
+    InvalidQuery(#[from] QueryRejection),
     #[error("internal server error")]
     ServerError,
     #[error(transparent)]
@@ -43,11 +55,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 impl IntoResponse for Error {
     fn into_response(self) -> axum::response::Response {
-        #[derive(Serialize)]
-        struct ErrorResponse {
-            message: String,
-        }
-
         let (status, message): (StatusCode, String) = match &self {
             Error::InvalidJson(rejection) => {
                 tracing::debug!(%rejection, "rejected request body");
@@ -55,6 +62,10 @@ impl IntoResponse for Error {
             }
             Error::InvalidPath(rejection) => {
                 tracing::debug!(%rejection, "rejected path parameter");
+                (rejection.status(), rejection.body_text())
+            }
+            Error::InvalidQuery(rejection) => {
+                tracing::debug!(%rejection, "rejected query string");
                 (rejection.status(), rejection.body_text())
             }
             Error::NotFound => (StatusCode::NOT_FOUND, "Not Found.".into()),

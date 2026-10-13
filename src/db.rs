@@ -1,5 +1,6 @@
 use std::{str::FromStr, thread::available_parallelism, time::Duration};
 
+use chrono::{DateTime, Utc};
 use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
@@ -10,6 +11,24 @@ pub fn now_ns() -> i64 {
     chrono::Utc::now()
         .timestamp_nanos_opt()
         .expect("system clock is outside the range of i64 nanoseconds")
+}
+
+/// A stored unix-nanosecond timestamp as a [`DateTime`].
+pub fn datetime_from_ns(ns: i64) -> DateTime<Utc> {
+    DateTime::from_timestamp_nanos(ns)
+}
+
+/// A [`DateTime`] as unix nanoseconds. Instants outside of what an `i64` can
+/// hold saturate, which keeps them ordered correctly against every stored
+/// timestamp when used as a range bound.
+pub fn datetime_to_ns(datetime: DateTime<Utc>) -> i64 {
+    datetime.timestamp_nanos_opt().unwrap_or_else(|| {
+        if datetime.timestamp() < 0 {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
+    })
 }
 
 /// SQLite allows only one writer at a time, so all writes go through a
