@@ -34,8 +34,8 @@ mod users;
 ///
 /// Every route, `/health` and `/api.json` included, is served under
 /// `path_prefix`. The document keeps the routes' own paths and names the
-/// prefix as its server, so a client generated from it doesn't depend on
-/// where it ends up deployed.
+/// prefix as its server (`/` if there is none), so a client generated from it
+/// doesn't depend on where it ends up deployed.
 pub fn router<S>(cors_origins: &CorsOrigins, path_prefix: &PathPrefix) -> (Router<S>, Arc<OpenApi>)
 where
     S: Clone + Send + Sync + 'static,
@@ -49,14 +49,13 @@ where
             version: env!("CARGO_PKG_VERSION").to_owned(),
             ..Info::default()
         },
-        servers: if path_prefix.is_empty() {
-            Vec::new()
-        } else {
-            vec![Server {
-                url: path_prefix.as_str().to_owned(),
-                ..Server::default()
-            }]
-        },
+        // Written out even when there is no prefix: that is what leaving
+        // `servers` out means, but some generators then guess a base URL from
+        // the name or address the document was fetched from.
+        servers: vec![Server {
+            url: path_prefix.to_string(),
+            ..Server::default()
+        }],
         ..OpenApi::default()
     };
 

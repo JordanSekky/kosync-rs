@@ -287,10 +287,9 @@ async fn the_openapi_document_describes_every_route() {
     ] {
         assert!(paths.contains_key(path), "{path} is missing");
     }
-    assert!(
-        api.get("servers")
-            .is_none_or(|servers| servers.is_null() || servers.as_array().unwrap().is_empty())
-    );
+    // Spelled out so generators don't guess a base URL from where the
+    // document came from
+    assert_eq!(api["servers"], json!([{ "url": "/" }]));
 }
 
 #[tokio::test]
