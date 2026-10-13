@@ -1,6 +1,6 @@
 use tokio_util::task::TaskTracker;
 
-use crate::{db::Db, upstream::Upstream};
+use crate::{db::Db, error::Error, upstream::Upstream};
 use axum::{
     Router,
     extract::FromRef,
@@ -29,4 +29,14 @@ where
         .route("/users/auth", get(users::authenticate))
         .route("/syncs/progress", put(progress::push))
         .route("/syncs/progress/{document}", get(progress::pull))
+        .fallback(not_found)
+        .method_not_allowed_fallback(method_not_allowed)
+}
+
+async fn not_found() -> Error {
+    Error::NotFound
+}
+
+async fn method_not_allowed() -> Error {
+    Error::MethodNotAllowed
 }

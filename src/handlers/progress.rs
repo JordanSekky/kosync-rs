@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::State,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,7 @@ use crate::{
     authenticated_user::AuthenticatedUser,
     db::Db,
     error::Result,
+    extract::{AppJson, AppPath},
     models::{Progress, ProgressUpdate},
     upstream::Upstream,
 };
@@ -57,7 +58,7 @@ pub async fn push(
     State(tasks): State<TaskTracker>,
     AuthHeaders { username, key }: AuthHeaders,
     AuthenticatedUser(user): AuthenticatedUser,
-    Json(request): Json<UpdateProgressRequest>,
+    AppJson(request): AppJson<UpdateProgressRequest>,
 ) -> Result<Json<UpdateProgressResponse>> {
     let metadata = request.metadata.as_ref();
     let insert = Progress::record(
@@ -117,7 +118,7 @@ pub struct GetProgressResponse {
 pub async fn pull(
     State(db): State<Db>,
     AuthenticatedUser(user): AuthenticatedUser,
-    Path(document): Path<String>,
+    AppPath(document): AppPath<String>,
 ) -> Result<Response> {
     let Some(latest) = Progress::latest(&db, user.id, &document).await? else {
         // The client reads a body without `percentage` as "no progress yet";

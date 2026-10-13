@@ -7,6 +7,7 @@ mod authenticated_user;
 mod config;
 mod db;
 mod error;
+mod extract;
 mod handlers;
 mod models;
 mod upstream;

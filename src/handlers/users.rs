@@ -1,4 +1,4 @@
-use axum::{Json, extract::State};
+use axum::{Json, extract::State, http::StatusCode};
 use bcrypt::DEFAULT_COST;
 use serde::{Deserialize, Serialize};
 
@@ -6,6 +6,7 @@ use crate::{
     authenticated_user::AuthenticatedUser,
     db::Db,
     error::{Error, Result},
+    extract::AppJson,
     models::User,
 };
 
@@ -29,8 +30,8 @@ pub struct RegistrationEnabled(pub bool);
 pub async fn register(
     State(db): State<Db>,
     State(RegistrationEnabled(enabled)): State<RegistrationEnabled>,
-    Json(request): Json<CreateUserRequest>,
-) -> Result<Json<CreateUserResponse>> {
+    AppJson(request): AppJson<CreateUserRequest>,
+) -> Result<(StatusCode, Json<CreateUserResponse>)> {
     if !enabled {
         return Err(Error::RegistrationDisabled);
     }
@@ -39,9 +40,13 @@ pub async fn register(
 
     User::create(&db, &request.username, &hashed).await?;
 
-    Ok(Json(CreateUserResponse {
-        username: request.username,
-    }))
+    // The client only treats 201 as a successful registration
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateUserResponse {
+            username: request.username,
+        }),
+    ))
 }
 
 #[derive(Serialize, Debug)]

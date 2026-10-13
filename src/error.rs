@@ -1,4 +1,9 @@
-use axum::{Json, http::StatusCode, response::IntoResponse};
+use axum::{
+    Json,
+    extract::rejection::{JsonRejection, PathRejection},
+    http::StatusCode,
+    response::IntoResponse,
+};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -13,6 +18,16 @@ pub enum Error {
     /// The username is already registered; carries the existing user.
     #[error("user {} already exists", .0.username)]
     Conflict(User),
+    #[error("not found")]
+    NotFound,
+    #[error("method not allowed")]
+    MethodNotAllowed,
+    /// The request body wasn't valid JSON of the expected shape.
+    #[error("invalid request body: {0}")]
+    InvalidJson(#[from] JsonRejection),
+    /// A path parameter couldn't be parsed.
+    #[error("invalid path: {0}")]
+    InvalidPath(#[from] PathRejection),
     #[error("internal server error")]
     ServerError,
     #[error(transparent)]
@@ -33,33 +48,50 @@ impl IntoResponse for Error {
             message: String,
         }
 
-        let (status, message) = match &self {
-            Error::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized"),
+        let (status, message): (StatusCode, String) = match &self {
+            Error::InvalidJson(rejection) => {
+                tracing::debug!(%rejection, "rejected request body");
+                (rejection.status(), rejection.body_text())
+            }
+            Error::InvalidPath(rejection) => {
+                tracing::debug!(%rejection, "rejected path parameter");
+                (rejection.status(), rejection.body_text())
+            }
+            Error::NotFound => (StatusCode::NOT_FOUND, "Not Found.".into()),
+            Error::MethodNotAllowed => {
+                (StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed.".into())
+            }
+            Error::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".into()),
             Error::Conflict(existing_user) => {
                 tracing::warn!(%existing_user, "Attempted to create user which already exists");
-                (StatusCode::CONFLICT, "User already exists.")
+                (StatusCode::CONFLICT, "User already exists.".into())
             }
-            Error::RegistrationDisabled => (StatusCode::FORBIDDEN, "Registration is disabled."),
-            Error::ServerError => (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error."),
+            Error::RegistrationDisabled => {
+                (StatusCode::FORBIDDEN, "Registration is disabled.".into())
+            }
+            Error::ServerError => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Internal Server Error.".into(),
+            ),
             Error::Database(error) => {
                 tracing::error!(%error, "database error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error.")
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Server Error.".into(),
+                )
             }
             Error::Upstream(upstream_error) => {
                 tracing::error!(%upstream_error, "upstream error");
-                (StatusCode::BAD_GATEWAY, "Upstream server error.")
+                (StatusCode::BAD_GATEWAY, "Upstream server error.".into())
             }
             Error::Bcrypt(bcrypt_error) => {
                 tracing::error!(%bcrypt_error, "bcrypt error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error.")
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal Server Error.".into(),
+                )
             }
         };
-        (
-            status,
-            Json(ErrorResponse {
-                message: message.to_owned(),
-            }),
-        )
-            .into_response()
+        (status, Json(ErrorResponse { message })).into_response()
     }
 }
