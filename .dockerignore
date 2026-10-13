@@ -1,0 +1,15 @@
+Dockerfile*
+docker-compose*
+.dockerignore
+.git
+.gitignore
+.github
+.vscode
+.idea
+.env
+*.env
+.claude
+target
+*.db
+*.db-shm
+*.db-wal
