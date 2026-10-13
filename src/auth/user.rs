@@ -6,7 +6,8 @@ use axum::{
 };
 use bcrypt::DEFAULT_COST;
 
-use crate::{auth::AuthHeaders, db::Db, error::Error, models::User};
+use super::AuthHeaders;
+use crate::{db::Db, error::Error, models::User};
 
 /// Verified against when the username is unknown, so that request takes as
 /// long as one with a wrong key and doesn't reveal which accounts exist.

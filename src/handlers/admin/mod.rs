@@ -21,6 +21,7 @@ mod devices;
 mod health;
 mod logs;
 mod progress;
+mod sse;
 mod users;
 
 /// Routes for the admin listener, which runs on its own port, together with

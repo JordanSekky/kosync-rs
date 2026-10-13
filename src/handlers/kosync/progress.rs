@@ -3,53 +3,18 @@ use axum::{
     extract::State,
     response::{IntoResponse, Response},
 };
-use serde::{Deserialize, Serialize};
 use tokio_util::task::TaskTracker;
 use tracing::Instrument;
 
 use crate::{
-    auth::AuthHeaders,
-    authenticated_user::AuthenticatedUser,
+    auth::{AuthHeaders, AuthenticatedUser},
     db::Db,
     error::Result,
     extract::{AppJson, AppPath},
     models::{Progress, ProgressUpdate},
+    protocol::{GetProgressResponse, UpdateProgressRequest, UpdateProgressResponse},
     upstream::Upstream,
 };
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Metadata {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    filename: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    authors: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct UpdateProgressRequest {
-    document: String,
-    /// Opaque position: an XPointer for reflowable documents, a page number
-    /// for paged ones
-    progress: String,
-    /// In [0, 1]
-    percentage: f64,
-    device: String,
-    /// The client always sends it, but the reference server doesn't require it
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device_id: Option<String>,
-    /// Only sent when the user opts in
-    #[serde(skip_serializing_if = "Option::is_none")]
-    metadata: Option<Metadata>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct UpdateProgressResponse {
-    document: String,
-    /// Unix seconds
-    timestamp: i64,
-}
 
 #[tracing::instrument(skip_all, fields(user_id = user.id, document = %request.document))]
 pub async fn push(
@@ -99,19 +64,6 @@ pub async fn push(
         document: insert.document,
         timestamp,
     }))
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GetProgressResponse {
-    username: String,
-    document: String,
-    progress: String,
-    percentage: f64,
-    device: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    device_id: Option<String>,
-    /// Unix seconds
-    timestamp: i64,
 }
 
 #[tracing::instrument(skip_all, fields(user_id = user.id, document = %document))]

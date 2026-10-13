@@ -245,9 +245,8 @@ npx openapi-typescript openapi.json -o api.d.ts
 
 - **Storage**: SQLite in WAL mode with two connection pools, a single-connection pool for writes and a read-only pool
   sized to the CPU count.
-- **History**: every push appends a row to `progress_history`. The `latest_progress` and `latest_device_progress` views
-  give the newest entry per document and per device. Timestamps are stored as unix nanoseconds and reported to clients in
-  seconds.
+- **History**: every push appends a row to `progress_history`. The `latest_progress` view gives the newest entry per
+  document. Timestamps are stored as unix nanoseconds and reported to clients in seconds.
 - **Authentication**: the key the client sends is bcrypt-hashed before it is stored. Verification runs on a blocking
   thread, and an unknown username does the same amount of work as a wrong key so account existence is not leaked.
 - **Shutdown**: on ctrl-c or SIGTERM both listeners stop accepting connections, lets in-flight requests and forwards

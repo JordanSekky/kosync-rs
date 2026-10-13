@@ -1,9 +1,9 @@
-mod book;
-mod device;
+//! What the sync protocol reads and writes. The admin API's read models are in
+//! [`admin`].
+
+pub mod admin;
 mod progress;
 mod user;
 
-pub use book::Book;
-pub use device::Device;
-pub use progress::{Progress, ProgressEntry, ProgressFilter, ProgressUpdate};
-pub use user::{User, UserSummary};
+pub use progress::{Progress, ProgressUpdate};
+pub use user::User;

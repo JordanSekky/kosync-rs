@@ -9,8 +9,6 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::models::User;
-
 /// The body of every error response.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ErrorResponse {
@@ -24,9 +22,9 @@ pub enum Error {
     Unauthorized,
     #[error("registration is disabled")]
     RegistrationDisabled,
-    /// The username is already registered; carries the existing user.
-    #[error("user {} already exists", .0.username)]
-    Conflict(User),
+    /// The username is already registered.
+    #[error("user {username} already exists")]
+    Conflict { username: String },
     #[error("not found")]
     NotFound,
     #[error("method not allowed")]
@@ -73,8 +71,8 @@ impl IntoResponse for Error {
                 (StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed.".into())
             }
             Error::Unauthorized => (StatusCode::UNAUTHORIZED, "Unauthorized".into()),
-            Error::Conflict(existing_user) => {
-                tracing::warn!(%existing_user, "Attempted to create user which already exists");
+            Error::Conflict { username } => {
+                tracing::warn!(%username, "Attempted to create user which already exists");
                 (StatusCode::CONFLICT, "User already exists.".into())
             }
             Error::RegistrationDisabled => {

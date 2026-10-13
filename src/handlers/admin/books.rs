@@ -4,10 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::{Db, datetime_from_ns},
-    error::Result,
-    extract::AppQuery,
-    models::Book,
+    db::Db, error::Result, extract::AppQuery, models::admin::Book, time::datetime_from_ns,
 };
 
 #[derive(Deserialize, JsonSchema, Debug)]

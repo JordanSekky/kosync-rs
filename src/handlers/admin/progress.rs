@@ -4,10 +4,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    db::{Db, datetime_from_ns, datetime_to_ns},
+    db::Db,
     error::Result,
     extract::AppQuery,
-    models::{ProgressEntry, ProgressFilter},
+    models::admin::{ProgressEntry, ProgressFilter},
+    time::{datetime_from_ns, datetime_to_ns},
 };
 
 const DEFAULT_LIMIT: u32 = 100;

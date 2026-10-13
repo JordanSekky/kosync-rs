@@ -11,7 +11,6 @@ use crate::{db::Db, upstream::Upstream};
 mod progress;
 mod users;
 
-pub use progress::UpdateProgressRequest;
 pub use users::RegistrationEnabled;
 
 /// The kosync API KOReader talks to. Works with any state that can hand out

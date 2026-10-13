@@ -7,7 +7,7 @@ use url::Url;
 use crate::{
     auth::{AUTH_KEY, AUTH_USER, AuthHeaders},
     error::{Error, Result},
-    handlers::kosync::UpdateProgressRequest,
+    protocol::UpdateProgressRequest,
 };
 
 /// What the reference server's API versioning keys on. The real client sends
